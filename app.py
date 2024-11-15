@@ -70,5 +70,25 @@ def get_abandoned_calls():
     
     return jsonify({"phone_numbers": numbers}), 200
 
+@app.route('/get_all_calls', methods=['GET'])
+def get_all_calls():
+    """
+    Endpoint to retrieve all phone numbers and their results.
+    Does not delete the data, only retrieves it.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Fetch all phone numbers and their results
+    cursor.execute("SELECT caller_id, timestamp FROM abandoned_calls")
+    rows = cursor.fetchall()
+    
+    # Prepare the response
+    calls = [{"phone_number": row[0], "timestamp": row[1]} for row in rows]
+    
+    conn.close()
+    
+    return jsonify({"all_calls": calls}), 200
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5040, debug=True)
