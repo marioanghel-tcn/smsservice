@@ -45,31 +45,34 @@ update_db_schema()
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """
-    Endpoint to receive webhook data. Filters for calls with the
-    result 'Answered Linkcall Abandoned' and stores their details.
+    Endpoint to receive webhook data. Handles the TCN payload format
+    and stores details for calls with 'Answered Linkcall Abandoned' or others.
     """
     try:
+        # Extract the JSON payload
         data = request.json
-        if isinstance(data, list):
-            for item in data:
-                call_result_json = item.get("callResultJson", {})
-                result = call_result_json.get("Result")
-                caller_id = call_result_json.get("CallerId")
-                client_sid = call_result_json.get("ClientSid")
-                
-                if result and caller_id and client_sid:
-                    # Insert into the database
-                    conn = sqlite3.connect(DB_FILE)
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        INSERT INTO abandoned_calls (caller_id, result, client_sid)
-                        VALUES (?, ?, ?)
-                    """, (caller_id, result, client_sid))
-                    conn.commit()
-                    conn.close()
+        if not data:
+            return jsonify({"error": "No JSON payload received"}), 400
+        
+        # Extract the callResultJson object
+        call_result_json = data.get("callResultJson", {})
+        result = call_result_json.get("Result")
+        caller_id = call_result_json.get("CallerId")
+        client_sid = call_result_json.get("ClientSid")
+        
+        if result and caller_id and client_sid:
+            # Insert into the database
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO abandoned_calls (caller_id, result, client_sid)
+                VALUES (?, ?, ?)
+            """, (caller_id, result, client_sid))
+            conn.commit()
+            conn.close()
             return jsonify({"status": "success"}), 200
         else:
-            return jsonify({"error": "Invalid payload structure"}), 400
+            return jsonify({"error": "Missing required fields"}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
