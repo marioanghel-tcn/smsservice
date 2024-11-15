@@ -30,19 +30,29 @@ init_db()
 def webhook():
     """
     Endpoint to receive webhook data. Filters for calls with the
-    result 'ANSWERED_LINKCALL_ABANDONED' and stores their caller ID.
+    result 'Answered Linkcall Abandoned' and stores their caller ID.
     """
-    data = request.json
-    if data and data.get("Result") == "ANSWERED_LINKCALL_ABANDONED":
-        caller_id = data.get("Callerid")
-        if caller_id:
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute("INSERT INTO abandoned_calls (caller_id) VALUES (?)", (caller_id,))
-            conn.commit()
-            conn.close()
+    try:
+        data = request.json  # Get the incoming JSON data
+        if isinstance(data, list):  # Handle the list structure
+            for item in data:
+                call_result_json = item.get("callResultJson", {})
+                result = call_result_json.get("Result")
+                caller_id = call_result_json.get("CallerId")
+                
+                if result and caller_id and result.lower() == "answered linkcall abandoned".lower():
+                    # Insert into the database
+                    conn = sqlite3.connect(DB_FILE)
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO abandoned_calls (caller_id) VALUES (?)", (caller_id,))
+                    conn.commit()
+                    conn.close()
             return jsonify({"status": "success"}), 200
-    return jsonify({"status": "ignored"}), 200
+        else:
+            return jsonify({"error": "Invalid payload structure"}), 400
+    except Exception as e:
+        # Log the error for debugging purposes
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/get_abandoned_calls', methods=['GET'])
 def get_abandoned_calls():
