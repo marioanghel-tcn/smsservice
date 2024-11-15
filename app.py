@@ -46,33 +46,40 @@ update_db_schema()
 def webhook():
     """
     Endpoint to receive webhook data. Handles the TCN payload format
-    and stores details for calls with 'Answered Linkcall Abandoned' or others.
+    and stores details for calls with any result.
     """
     try:
         # Extract the JSON payload
         data = request.json
+        
+        print(f"Received payload: {data}")
+        
         if not data:
             return jsonify({"error": "No JSON payload received"}), 400
         
         # Extract the callResultJson object
         call_result_json = data.get("callResultJson", {})
+        if not call_result_json:
+            return jsonify({"error": "Missing callResultJson object"}), 400
+
+        # Extract required fields
         result = call_result_json.get("Result")
         caller_id = call_result_json.get("CallerId")
         client_sid = call_result_json.get("ClientSid")
         
-        if result and caller_id and client_sid:
-            # Insert into the database
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO abandoned_calls (caller_id, result, client_sid)
-                VALUES (?, ?, ?)
-            """, (caller_id, result, client_sid))
-            conn.commit()
-            conn.close()
-            return jsonify({"status": "success"}), 200
-        else:
+        if not (result and caller_id and client_sid):
             return jsonify({"error": "Missing required fields"}), 400
+        
+        # Insert into the database
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO abandoned_calls (caller_id, result, client_sid)
+            VALUES (?, ?, ?)
+        """, (caller_id, result, client_sid))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "success"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
