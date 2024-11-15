@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 import sqlite3
 import os
 
@@ -77,7 +77,7 @@ def webhook():
 def get_abandoned_calls():
     """
     Retrieve abandoned calls for a specific ClientSid.
-    Clears data only for that ClientSid after retrieval.
+    Returns a CSV file without headers and clears data only for that ClientSid after retrieval.
     """
     client_sid = request.args.get('ClientSid')
     if not client_sid:
@@ -94,8 +94,8 @@ def get_abandoned_calls():
     """, (client_sid,))
     rows = cursor.fetchall()
     
-    # Prepare response
-    numbers = [row[1] for row in rows]
+    # Prepare CSV content
+    csv_content = "\n".join([row[1] for row in rows])
     ids = [row[0] for row in rows]
     
     # Delete only the fetched records for this ClientSid
@@ -105,7 +105,8 @@ def get_abandoned_calls():
     
     conn.close()
     
-    return jsonify({"phone_numbers": numbers}), 200
+    # Return CSV response
+    return Response(csv_content, mimetype="text/csv")
 
 @app.route('/get_all_calls', methods=['GET'])
 def get_all_calls():
