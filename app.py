@@ -42,49 +42,49 @@ def update_db_schema():
 init_db()
 update_db_schema()
 
-# Helper function to use SQLite's row_factory
+# use row_factory
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row  # Rows will be returned as dictionaries
+    conn.row_factory = sqlite3.Row  # rows as dictionaries
     return conn
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        # Extract query parameters
+        # extract params
         calltype_filter = request.args.get('calltype', 'all')  # Default to "all"
 
-        # Parse the calltype_filter parameter
+        #parse
         if calltype_filter.lower() != "all":
             allowed_call_types = calltype_filter.split(",")
             allowed_call_types = [ct.strip() for ct in allowed_call_types]
         else:
-            allowed_call_types = None  # No filter needed for "all"
+            allowed_call_types = None  # no filter for "all"
 
-        # Extract JSON payload
+        # extract json payload
         data = request.json
         if not data:
             return jsonify({"error": "No JSON payload received"}), 400
 
-        # Extract fields from the payload
+        # extract fields from payload
         result = data.get("Result")
         caller_id = data.get("CallerId")
         client_sid = data.get("ClientSid")
         call_type = data.get("CallType")
         phone_number = data.get("PhoneNumber")
 
-        # Validate required fields
+        # validate required fields
         if not (result and caller_id and client_sid and call_type):
             return jsonify({"error": "Missing required fields"}), 400
 
-        # Check if the call type is allowed
+        # check if call type allowed
         if allowed_call_types and call_type not in allowed_call_types:
             return jsonify({"status": "dropped", "reason": "Call type not allowed"}), 200
 
-        # Determine the phone number
+        # phone number logic
         dynamic_phone_number = caller_id if call_type not in ["outbound", "manual", "preview"] else phone_number
 
-        # Insert into database
+        # into db
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
@@ -117,14 +117,13 @@ def get_abandoned_calls():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Parse calltype parameter
+    # parse calltype
     if calltype.lower() != "all":
-        call_types = calltype.split(",")  # Split multiple types
-        call_types = [ct.strip() for ct in call_types]  # Clean up whitespace
+        call_types = calltype.split(",")  # split types
+        call_types = [ct.strip() for ct in call_types]  # cleanup spaces
     else:
-        call_types = None  # No filter needed for "all"
+        call_types = None  # no filter for all
 
-    # Build the query dynamically
     query = "SELECT * FROM abandoned_calls WHERE client_sid = ? AND result = 'Answered Linkcall Abandoned'"
     params = [client_sid]
 
@@ -134,15 +133,13 @@ def get_abandoned_calls():
 
     rows = cursor.execute(query, params).fetchall()
 
-    # Generate CSV content dynamically
     csv_content = "\n".join([get_dynamic_phone_number(row) for row in rows])
 
-    # Delete all calls for this ClientSid
+    # delete all calls from this clientsid
     cursor.execute("DELETE FROM abandoned_calls WHERE client_sid = ?", (client_sid,))
     conn.commit()
     conn.close()
 
-    # Return CSV
     return Response(csv_content, mimetype="text/csv")
 
 @app.route('/get_abandoned_admin', methods=['GET'])
@@ -154,7 +151,7 @@ def get_abandoned_admin():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # fetch all abandoned calls for the specific ClientSid
+    # fetch all aba calls for this clientsid
     rows = cursor.execute("""
         SELECT * FROM abandoned_calls
         WHERE result = 'Answered Linkcall Abandoned' AND client_sid = ?
@@ -184,7 +181,7 @@ def get_all_calls():
     cursor = conn.cursor()
 
     if client_sid:
-        # fetch records for a specific ClientSid
+        # fetch records for specific clientsid
         rows = cursor.execute("""
             SELECT * FROM abandoned_calls WHERE client_sid = ?
         """, (client_sid,)).fetchall()
@@ -217,7 +214,7 @@ def clear_database():
 
 # initialize scheduler
 scheduler = BackgroundScheduler(timezone="UTC")
-scheduler.add_job(clear_database, 'cron', hour=0, minute=0)  # Run at midnight UTC
+scheduler.add_job(clear_database, 'cron', hour=0, minute=0)  # run at midnight UTC
 scheduler.start()
 
 if __name__ == '__main__':
