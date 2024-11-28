@@ -111,7 +111,7 @@ def get_abandoned_calls():
         call_types = None  # No filter needed for "all"
 
     # Build the query dynamically
-    query = "SELECT * FROM abandoned_calls WHERE client_sid = ?"
+    query = "SELECT * FROM abandoned_calls WHERE client_sid = ? AND result = 'Answered Linkcall Abandoned'"
     params = [client_sid]
 
     if call_types:
@@ -122,6 +122,10 @@ def get_abandoned_calls():
 
     # Generate CSV content dynamically
     csv_content = "\n".join([get_dynamic_phone_number(row) for row in rows])
+
+    # Delete all calls for this ClientSid
+    cursor.execute("DELETE FROM abandoned_calls WHERE client_sid = ?", (client_sid,))
+    conn.commit()
     conn.close()
 
     # Return CSV
