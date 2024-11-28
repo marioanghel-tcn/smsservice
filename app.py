@@ -51,26 +51,40 @@ def get_db_connection():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        # extract json payload
+        # Extract query parameters
+        calltype_filter = request.args.get('calltype', 'all')  # Default to "all"
+
+        # Parse the calltype_filter parameter
+        if calltype_filter.lower() != "all":
+            allowed_call_types = calltype_filter.split(",")
+            allowed_call_types = [ct.strip() for ct in allowed_call_types]
+        else:
+            allowed_call_types = None  # No filter needed for "all"
+
+        # Extract JSON payload
         data = request.json
         if not data:
             return jsonify({"error": "No JSON payload received"}), 400
 
-        # extract fields
+        # Extract fields from the payload
         result = data.get("Result")
         caller_id = data.get("CallerId")
         client_sid = data.get("ClientSid")
         call_type = data.get("CallType")
         phone_number = data.get("PhoneNumber")
 
-        # validate fields
+        # Validate required fields
         if not (result and caller_id and client_sid and call_type):
             return jsonify({"error": "Missing required fields"}), 400
 
-        # determine the phone number
+        # Check if the call type is allowed
+        if allowed_call_types and call_type not in allowed_call_types:
+            return jsonify({"status": "dropped", "reason": "Call type not allowed"}), 200
+
+        # Determine the phone number
         dynamic_phone_number = caller_id if call_type not in ["outbound", "manual", "preview"] else phone_number
 
-        # insert into db
+        # Insert into database
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
