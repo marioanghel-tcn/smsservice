@@ -42,6 +42,12 @@ def update_db_schema():
 init_db()
 update_db_schema()
 
+# Helper function to use SQLite's row_factory
+def get_db_connection():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row  # Rows will be returned as dictionaries
+    return conn
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -54,20 +60,18 @@ def webhook():
         result = data.get("Result")
         caller_id = data.get("CallerId")
         client_sid = data.get("ClientSid")
-        call_type = data.get("CallType")  # New field
-        phone_number = data.get("PhoneNumber")  # New field for outbound calls
+        call_type = data.get("CallType")
+        phone_number = data.get("PhoneNumber")
 
         # validate fields
         if not (result and caller_id and client_sid and call_type):
             return jsonify({"error": "Missing required fields"}), 400
 
-        # decide what to store as phone_number
-        dynamic_phone_number = caller_id  # Default to CallerId for inbound calls
-        if call_type in ["outbound", "manual", "preview"]:
-            dynamic_phone_number = phone_number  # Use PhoneNumber for these call types
+        # determine the phone number
+        dynamic_phone_number = caller_id if call_type not in ["outbound", "manual", "preview"] else phone_number
 
         # insert into db
-        conn = sqlite3.connect(DB_FILE)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO abandoned_calls (caller_id, phone_number, result, client_sid, call_type)
@@ -75,50 +79,52 @@ def webhook():
         """, (caller_id, dynamic_phone_number, result, client_sid, call_type))
         conn.commit()
         conn.close()
+
         return jsonify({"status": "success"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 def get_dynamic_phone_number(row):
-    # Determine the phone number dynamically based on the call type
-    call_type = row[3]
-    return row[1] if call_type in ["outbound", "manual", "preview"] else row[0]
+    """
+    Determine the phone number dynamically based on call type.
+    """
+    if row['call_type'] in ["outbound", "manual", "preview"]:
+        return row['phone_number']
+    return row['caller_id']
 
 @app.route('/get_abandoned_calls', methods=['GET'])
 def get_abandoned_calls():
     client_sid = request.args.get('ClientSid')
+    calltype = request.args.get('calltype', 'all')
+
     if not client_sid:
         return jsonify({"error": "ClientSid parameter is required"}), 400
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # fetch phone numbers for the specific ClientSid where call type is "inbound"
-    cursor.execute("""
-        SELECT caller_id, phone_number, result, call_type, id
-        FROM abandoned_calls
-        WHERE result = 'Answered Linkcall Abandoned' AND client_sid = ? AND call_type = 'inbound'
-    """, (client_sid,))
-    rows = cursor.fetchall()
-    
-    # generate CSV content dynamically
-    csv_content = "\n".join([get_dynamic_phone_number(row) for row in rows]) if rows else ""
-    ids = [row[4] for row in rows]
-    
-    # fetch all calls for ClientSid to be cleared
-    cursor.execute("""
-        SELECT id FROM abandoned_calls WHERE client_sid = ?
-    """, (client_sid,))
-    all_ids = [row[0] for row in cursor.fetchall()]
-    
-    # delete all calls for this ClientSid
-    if all_ids:
-        cursor.executemany("DELETE FROM abandoned_calls WHERE id = ?", [(id_,) for id_ in all_ids])
-        conn.commit()
-    
+
+    # Parse calltype parameter
+    if calltype.lower() != "all":
+        call_types = calltype.split(",")  # Split multiple types
+        call_types = [ct.strip() for ct in call_types]  # Clean up whitespace
+    else:
+        call_types = None  # No filter needed for "all"
+
+    # Build the query dynamically
+    query = "SELECT * FROM abandoned_calls WHERE client_sid = ?"
+    params = [client_sid]
+
+    if call_types:
+        query += " AND call_type IN ({})".format(", ".join("?" for _ in call_types))
+        params.extend(call_types)
+
+    rows = cursor.execute(query, params).fetchall()
+
+    # Generate CSV content dynamically
+    csv_content = "\n".join([get_dynamic_phone_number(row) for row in rows])
     conn.close()
-    
-    # return csv
+
+    # Return CSV
     return Response(csv_content, mimetype="text/csv")
 
 @app.route('/get_abandoned_admin', methods=['GET'])
@@ -127,25 +133,23 @@ def get_abandoned_admin():
     if not client_sid:
         return jsonify({"error": "ClientSid parameter is required"}), 400
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     # fetch all abandoned calls for the specific ClientSid
-    cursor.execute("""
-        SELECT caller_id, phone_number, result, client_sid, call_type, timestamp
-        FROM abandoned_calls
+    rows = cursor.execute("""
+        SELECT * FROM abandoned_calls
         WHERE result = 'Answered Linkcall Abandoned' AND client_sid = ?
-    """, (client_sid,))
-    rows = cursor.fetchall()
+    """, (client_sid,)).fetchall()
 
     # response
     abandoned_calls = [
         {
             "phone_number": get_dynamic_phone_number(row),
-            "result": row[2],
-            "client_sid": row[3],
-            "call_type": row[4],
-            "timestamp": row[5]
+            "result": row['result'],
+            "client_sid": row['client_sid'],
+            "call_type": row['call_type'],
+            "timestamp": row['timestamp']
         }
         for row in rows
     ]
@@ -158,42 +162,35 @@ def get_abandoned_admin():
 def get_all_calls():
     client_sid = request.args.get('ClientSid')
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     if client_sid:
         # fetch records for a specific ClientSid
-        cursor.execute("""
-            SELECT caller_id, phone_number, result, client_sid, call_type
-            FROM abandoned_calls
-            WHERE client_sid = ?
-        """, (client_sid,))
+        rows = cursor.execute("""
+            SELECT * FROM abandoned_calls WHERE client_sid = ?
+        """, (client_sid,)).fetchall()
     else:
         # fetch all records
-        cursor.execute("""
-            SELECT caller_id, phone_number, result, client_sid, call_type
-            FROM abandoned_calls
-        """)
-    
-    rows = cursor.fetchall()
-    
+        rows = cursor.execute("SELECT * FROM abandoned_calls").fetchall()
+
     # response
     calls = [
         {
             "phone_number": get_dynamic_phone_number(row),
-            "result": row[2],
-            "client_sid": row[3],
-            "call_type": row[4]
+            "result": row['result'],
+            "client_sid": row['client_sid'],
+            "call_type": row['call_type']
         }
         for row in rows
     ]
-    
+
     conn.close()
-    
+
     return jsonify({"all_calls": calls}), 200
 
 def clear_database():
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM abandoned_calls")
     conn.commit()
